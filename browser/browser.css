@@ -1,0 +1,15 @@
+div.section {
+  border: 0.3em solid blue;
+  border-radius: 1em;
+  padding: 1em;
+  position: relative;
+  margin-top: 2em;
+}
+
+div.sectiontitle {
+  background: white;
+  padding-left: 1em;
+  padding-right: 1em;
+  position: absolute;
+  top: -0.8em;
+}

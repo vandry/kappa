@@ -1,0 +1,35 @@
+syntax = "proto2";
+
+package kappa;
+
+message Annotation {
+  optional string key = 1;
+  optional string value = 2;
+}
+
+message Label {
+  optional string key = 1;
+  optional string value = 2;
+}
+
+message ObjectMeta {
+  optional string namespace = 1;
+  optional string name = 2;
+  repeated Annotation annotations = 3;
+  repeated Label labels = 4;
+}
+
+message Pod {
+  optional ObjectMeta metadata = 1;
+}
+
+message ListPodsRequest {
+}
+
+message ListPodsResponse {
+  repeated Pod pods = 1;
+}
+
+service KappaBrowser {
+  rpc ListPods(ListPodsRequest) returns (ListPodsResponse) {}
+}
