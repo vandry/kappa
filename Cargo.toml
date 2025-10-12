@@ -16,11 +16,11 @@ async-stream = "0.3.6"
 axum = "0.7.9"
 backoff = { version = "0.4.0", features = ["futures", "tokio"] }
 clap = { version = "4.5", features = ["derive"] }
-comprehensive = { version = "0.7.4" }
-comprehensive_grpc = { version = "0.7.2", features = ["experimental", "tls"] }
-comprehensive_http = { version = "0.2.0", features = ["tls"] }
-comprehensive_spiffe = { version = "0.2.1" }
-comprehensive_tls = { version = "0.3.2", features = ["dispatch"] }
+comprehensive = { version = "0.8.0" }
+comprehensive_grpc = { version = "0.8.0", features = ["experimental", "tls"] }
+comprehensive_http = { version = "0.3.0", features = ["tls"] }
+comprehensive_spiffe = { version = "0.3.0" }
+comprehensive_tls = { version = "0.4.0", features = ["dispatch"] }
 disk = "0.1.21"
 env_logger = "0.11"
 futures = "0.3.31"

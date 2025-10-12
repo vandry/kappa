@@ -1,4 +1,3 @@
-use comprehensive::ResourceDependencies;
 use comprehensive::v1::{AssemblyRuntime, Resource, TaskWithCleanup, resource};
 use futures::future::Either;
 use std::path::PathBuf;
@@ -120,15 +119,10 @@ impl TaskWithCleanup for SocksServerTask {
     }
 }
 
-#[derive(ResourceDependencies)]
-pub struct SocksServerDependencies {
-    router: Arc<DomainRouter>,
-}
-
 #[resource]
 impl Resource for SocksServer {
     fn new(
-        d: SocksServerDependencies,
+        (router,): (Arc<DomainRouter>,),
         a: SocksServerArgs,
         api: &mut AssemblyRuntime<'_>,
     ) -> Result<Arc<Self>, std::io::Error> {
@@ -152,7 +146,7 @@ impl Resource for SocksServer {
         })?;
         api.set_task_with_cleanup(SocksServerTask {
             cancel: CancellationToken::new(),
-            listener_and_router: Some((listener, d.router)),
+            listener_and_router: Some((listener, router)),
             socket_path: a.socks_listen,
         });
         Ok(Arc::new(Self))

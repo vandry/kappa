@@ -1,5 +1,4 @@
 use async_stream::stream;
-use comprehensive::ResourceDependencies;
 use comprehensive::v1::{AssemblyRuntime, Resource, resource};
 use comprehensive_grpc::GrpcClient;
 use futures::{Stream, StreamExt};
@@ -12,21 +11,20 @@ use tonic::{Code, Status};
 use crate::pb::{Destination, StreamRequest, StreamResponse};
 
 #[derive(GrpcClient)]
-struct GatewayClient(crate::pb::gateway_client::GatewayClient<comprehensive_grpc::client::Channel>);
+pub struct GatewayClient(
+    crate::pb::gateway_client::GatewayClient<comprehensive_grpc::client::Channel>,
+);
 
 pub struct GatewayEncap(Arc<GatewayClient>);
-
-#[derive(ResourceDependencies)]
-pub struct GatewayEncapDependencies(Arc<GatewayClient>);
 
 #[resource]
 impl Resource for GatewayEncap {
     fn new(
-        d: GatewayEncapDependencies,
+        (gateway_client,): (Arc<GatewayClient>,),
         _: comprehensive::NoArgs,
         _: &mut AssemblyRuntime<'_>,
     ) -> Result<Arc<Self>, std::convert::Infallible> {
-        Ok(Arc::new(Self(d.0)))
+        Ok(Arc::new(Self(gateway_client)))
     }
 }
 

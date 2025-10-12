@@ -1,4 +1,3 @@
-use comprehensive::ResourceDependencies;
 use comprehensive::v1::{AssemblyRuntime, Resource, resource};
 use http::Uri;
 use std::sync::Arc;
@@ -45,18 +44,15 @@ pub struct DomainRouterArgs {
     domain_suffix: Option<String>,
 }
 
-#[derive(ResourceDependencies)]
-pub struct DomainRouterDependencies {
-    encap: Arc<crate::encap::GatewayEncap>,
-    add_mtls: Arc<crate::mtls::AddMtls>,
-    http_server: Arc<crate::http_server::HttpServer>,
-    api_server: Arc<crate::api::ApiServer>,
-}
-
 #[resource]
 impl Resource for DomainRouter {
     fn new(
-        d: DomainRouterDependencies,
+        (encap, add_mtls, http_server, api_server): (
+            Arc<crate::encap::GatewayEncap>,
+            Arc<crate::mtls::AddMtls>,
+            Arc<crate::http_server::HttpServer>,
+            Arc<crate::api::ApiServer>,
+        ),
         a: DomainRouterArgs,
         _: &mut AssemblyRuntime<'_>,
     ) -> Result<Arc<Self>, std::io::Error> {
@@ -65,10 +61,10 @@ impl Resource for DomainRouter {
                 .domain_suffix
                 .map(|s| s.split('.').map(ToString::to_string).collect())
                 .unwrap_or_default(),
-            encap: d.encap,
-            add_mtls: d.add_mtls,
-            http_server: d.http_server,
-            api_server: d.api_server,
+            encap,
+            add_mtls,
+            http_server,
+            api_server,
         }))
     }
 }

@@ -1,6 +1,6 @@
 use async_stream::stream;
+use comprehensive::NoArgs;
 use comprehensive::v1::{AssemblyRuntime, Resource, resource};
-use comprehensive::{NoArgs, ResourceDependencies};
 use futures::future::Either;
 use futures::pin_mut;
 use futures::{Stream, StreamExt};
@@ -19,25 +19,16 @@ pub struct Gateway {
     kube: Arc<crate::kube::KubeApi>,
 }
 
-#[derive(ResourceDependencies)]
-pub struct GatewayDependencies {
-    acl: Arc<crate::acl::SimpleACL>,
-    kube: Arc<crate::kube::KubeApi>,
-}
-
 #[resource]
 #[export_grpc(crate::pb::gateway_server::GatewayServer)]
 #[proto_descriptor(crate::pb::FILE_DESCRIPTOR_SET)]
 impl Resource for Gateway {
     fn new(
-        d: GatewayDependencies,
+        (acl, kube): (Arc<crate::acl::SimpleACL>, Arc<crate::kube::KubeApi>),
         _: NoArgs,
         _: &mut AssemblyRuntime<'_>,
     ) -> Result<Arc<Self>, std::convert::Infallible> {
-        Ok(Arc::new(Self {
-            acl: d.acl,
-            kube: d.kube,
-        }))
+        Ok(Arc::new(Self { acl, kube }))
     }
 }
 

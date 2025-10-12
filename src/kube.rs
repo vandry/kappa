@@ -1,5 +1,4 @@
 use backoff::ExponentialBackoffBuilder;
-use comprehensive::ResourceDependencies;
 use comprehensive::health::HealthReporter;
 use comprehensive::v1::{AssemblyRuntime, Resource, resource};
 use futures::future::TryFutureExt as _;
@@ -12,21 +11,18 @@ use thiserror::Error;
 use tokio::sync::SetOnce;
 use tonic::Status;
 
-#[derive(ResourceDependencies)]
-pub struct KubeApiDependencies(Arc<HealthReporter>);
-
 pub struct KubeApi(SetOnce<Client>);
 
 #[resource]
 impl Resource for KubeApi {
     fn new(
-        d: KubeApiDependencies,
+        (health_reporter,): (Arc<HealthReporter>,),
         _: comprehensive::NoArgs,
         api: &mut AssemblyRuntime<'_>,
     ) -> Result<Arc<Self>, comprehensive::ComprehensiveError> {
         let shared = Arc::new(Self(SetOnce::new()));
         let setter = shared.clone();
-        let signaller = d.0.register("KubeApi")?;
+        let signaller = health_reporter.register("KubeApi")?;
         let backoff = ExponentialBackoffBuilder::new()
             .with_max_elapsed_time(None) // Never completely give up.
             .build();

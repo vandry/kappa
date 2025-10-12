@@ -1,5 +1,5 @@
+use comprehensive::NoArgs;
 use comprehensive::v1::{AssemblyRuntime, Resource, resource};
-use comprehensive::{NoArgs, ResourceDependencies};
 use itertools::Itertools;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use tower_layer::Stack;
 use crate::pb::kappa_browser_server::{KappaBrowser, KappaBrowserServer};
 
 #[derive(Clone)]
-struct Api {
+pub struct Api {
     kube: Arc<crate::kube::KubeApi>,
 }
 
@@ -35,21 +35,16 @@ impl KappaBrowser for Api {
     }
 }
 
-#[derive(ResourceDependencies)]
-pub struct ApiDependencies {
-    kube: Arc<crate::kube::KubeApi>,
-}
-
 #[resource]
 #[export_grpc(KappaBrowserServer)]
 #[proto_descriptor(crate::pb::FILE_DESCRIPTOR_SET)]
 impl Resource for Api {
     fn new(
-        d: ApiDependencies,
+        (kube,): (Arc<crate::kube::KubeApi>,),
         _: NoArgs,
         _: &mut AssemblyRuntime<'_>,
     ) -> Result<Arc<Self>, std::convert::Infallible> {
-        Ok(Arc::new(Self { kube: d.kube }))
+        Ok(Arc::new(Self { kube }))
     }
 }
 
@@ -58,16 +53,13 @@ pub struct ApiServer {
     routes: Arc<comprehensive_grpc::server::GrpcServingRoutes>,
 }
 
-#[derive(ResourceDependencies)]
-pub struct ApiServerDependencies {
-    routes: Arc<comprehensive_grpc::server::GrpcServingRoutes>,
-    _service: PhantomData<Api>,
-}
-
 #[resource]
 impl Resource for ApiServer {
     fn new(
-        d: ApiServerDependencies,
+        (routes, _): (
+            Arc<comprehensive_grpc::server::GrpcServingRoutes>,
+            PhantomData<Api>,
+        ),
         _: NoArgs,
         _: &mut AssemblyRuntime<'_>,
     ) -> Result<Arc<Self>, std::convert::Infallible> {
@@ -75,10 +67,7 @@ impl Resource for ApiServer {
             .accept_http1(true)
             .layer(CorsLayer::permissive())
             .layer(GrpcWebLayer::new());
-        Ok(Arc::new(Self {
-            server,
-            routes: d.routes,
-        }))
+        Ok(Arc::new(Self { server, routes }))
     }
 }
 

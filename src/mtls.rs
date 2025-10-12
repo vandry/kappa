@@ -1,4 +1,3 @@
-use comprehensive::ResourceDependencies;
 use comprehensive::v1::{AssemblyRuntime, Resource, resource};
 use comprehensive_tls::TlsConfig;
 use http::Uri;
@@ -22,17 +21,14 @@ pub enum AddMtlsError {
 
 pub struct AddMtls(Arc<TlsConfig>);
 
-#[derive(ResourceDependencies)]
-pub struct AddMtlsDependencies(Arc<TlsConfig>);
-
 #[resource]
 impl Resource for AddMtls {
     fn new(
-        d: AddMtlsDependencies,
+        (tls_config,): (Arc<TlsConfig>,),
         _: comprehensive::NoArgs,
         _: &mut AssemblyRuntime<'_>,
     ) -> Result<Arc<Self>, std::convert::Infallible> {
-        Ok(Arc::new(Self(d.0)))
+        Ok(Arc::new(Self(tls_config)))
     }
 }
 
