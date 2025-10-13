@@ -4,6 +4,8 @@ use std::sync::Arc;
 mod api;
 mod convert;
 mod encap;
+mod endpoint;
+mod error_server;
 mod http_server;
 mod kube;
 mod mtls;

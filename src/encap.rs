@@ -1,7 +1,6 @@
-use async_stream::stream;
 use comprehensive::v1::{AssemblyRuntime, Resource, resource};
 use comprehensive_grpc::GrpcClient;
-use futures::{Stream, StreamExt};
+use futures::Stream;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker, ready};
@@ -212,29 +211,43 @@ impl Stream for ToGatewayStream {
     type Item = StreamRequest;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let maybe_bufs = ready!(self.to_gateway.lock().unwrap().poll_next(cx));
-        Poll::Ready(maybe_bufs.map(|bufs| StreamRequest {
-            connect_to: self.connect_to.take(),
-            b: Some(itertools::concat(bufs)),
-        }))
+        let maybe_bufs = self.to_gateway.lock().unwrap().poll_next(cx);
+        match (maybe_bufs, self.connect_to.take()) {
+            (Poll::Pending, None) => Poll::Pending,
+            (Poll::Pending, Some(connect_to)) => Poll::Ready(Some(StreamRequest {
+                connect_to: Some(connect_to),
+                b: None,
+            })),
+            (Poll::Ready(None), _) => Poll::Ready(None),
+            (Poll::Ready(Some(bufs)), connect_to) => Poll::Ready(Some(StreamRequest {
+                connect_to,
+                b: Some(itertools::concat(bufs)),
+            })),
+        }
     }
 }
 
-fn make_rpc(
+pub struct Connecting {
     client: Arc<GatewayClient>,
-    connect_to: Destination,
+    dest: Destination,
     to_gateway: Arc<Mutex<ToGateway>>,
-) -> impl Stream<Item = Result<StreamResponse, Status>> {
-    stream! {
-        let mut s = match client.client().stream(ToGatewayStream::new(connect_to, to_gateway)).await {
-            Err(e) => {
-                yield Err(e);
-                return;
-            }
-            Ok(s) => s.into_inner(),
-        };
-        while let Some(item) = s.next().await {
-            yield item;
+}
+
+impl crate::endpoint::Connectable for Connecting {
+    type IO = EncapIO;
+
+    async fn connect(self) -> Result<EncapIO, Arc<dyn crate::error_server::ErrorHtml>> {
+        match self
+            .client
+            .client()
+            .stream(ToGatewayStream::new(self.dest, self.to_gateway.clone()))
+            .await
+        {
+            Ok(from_gateway) => Ok(EncapIO::new(
+                self.to_gateway,
+                Box::pin(from_gateway.into_inner()),
+            )),
+            Err(e) => Err(Arc::new(e)),
         }
     }
 }
@@ -245,14 +258,17 @@ impl GatewayEncap {
         namespace: impl Into<String>,
         pod: impl Into<String>,
         port: u16,
-    ) -> EncapIO {
+    ) -> Connecting {
         let to_gateway = Arc::new(Mutex::new(ToGateway::default()));
         let dest = Destination {
             namespace: Some(namespace.into()),
             pod: Some(pod.into()),
             port: Some(port.into()),
         };
-        let from_gateway = Box::pin(make_rpc(self.0.clone(), dest, to_gateway.clone()));
-        EncapIO::new(to_gateway, from_gateway)
+        Connecting {
+            client: self.0.clone(),
+            dest,
+            to_gateway,
+        }
     }
 }

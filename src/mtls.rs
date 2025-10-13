@@ -1,15 +1,15 @@
 use comprehensive::v1::{AssemblyRuntime, Resource, resource};
 use comprehensive_tls::TlsConfig;
 use http::Uri;
-use pin_project_lite::pin_project;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll, Waker, ready};
 use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
+use tokio_rustls::rustls::client::ClientConfig;
 use tokio_rustls::rustls::pki_types::ServerName;
-use tokio_rustls::{Connect, TlsConnector};
+
+use crate::endpoint::Connectable;
+use crate::error_server::ErrorHtml;
 
 #[derive(Debug, Error)]
 pub enum AddMtlsError {
@@ -32,133 +32,33 @@ impl Resource for AddMtls {
     }
 }
 
-pin_project! {
-    struct Connecting<T> {
-        #[pin] inner: Connect<T>,
-        write_waker: Option<Waker>,
-    }
+pub struct ConnectInSequence<T> {
+    inner: T,
+    tls_config: Arc<ClientConfig>,
+    name: ServerName<'static>,
 }
 
-impl<T> From<Connect<T>> for Connecting<T> {
-    fn from(inner: Connect<T>) -> Self {
-        Self {
-            inner,
-            write_waker: None,
-        }
-    }
-}
+impl<T: Connectable> Connectable for ConnectInSequence<T> {
+    type IO = TlsStream<T::IO>;
 
-impl<T> Connecting<T>
-where
-    T: AsyncRead + AsyncWrite + Unpin,
-{
-    fn poll(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<TlsStream<T>, std::io::Error>> {
-        let r = ready!(self.as_mut().project().inner.poll(cx));
-        if let Some(waker) = self.write_waker.take() {
-            waker.wake();
-        }
-        Poll::Ready(r)
-    }
-
-    fn poll_write<R>(&mut self, cx: &mut Context<'_>) -> Poll<R> {
-        let my_waker = cx.waker();
-        if let Some(ref waker) = self.write_waker {
-            if waker.will_wake(my_waker) {
-                return Poll::Pending;
-            }
-        }
-        self.write_waker = Some(my_waker.clone());
-        Poll::Pending
-    }
-}
-
-pin_project! {
-    #[project = AddMtlsIOProj]
-    pub enum AddMtlsIO<T> {
-        InProgress { #[pin] c: Connecting<T> },
-        Connected { #[pin] inner: TlsStream<T> },
-        Broken,
-    }
-}
-
-impl<T> AddMtlsIO<T> {
-    fn new(inner: Connect<T>) -> Self {
-        Self::InProgress { c: inner.into() }
-    }
-}
-
-impl<T> AsyncRead for AddMtlsIO<T>
-where
-    T: AsyncRead + AsyncWrite + Unpin,
-{
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        match self.as_mut().project() {
-            AddMtlsIOProj::InProgress { c } => match ready!(c.poll(cx)) {
-                Ok(s) => {
-                    self.set(Self::Connected { inner: s });
-                    self.poll_read(cx, buf)
-                }
-                Err(e) => {
-                    self.set(Self::Broken);
-                    Poll::Ready(Err(e))
-                }
-            },
-            AddMtlsIOProj::Broken => Poll::Ready(Err(std::io::ErrorKind::Other.into())),
-            AddMtlsIOProj::Connected { inner } => inner.poll_read(cx, buf),
-        }
-    }
-}
-
-impl<T> AsyncWrite for AddMtlsIO<T>
-where
-    T: AsyncRead + AsyncWrite + Unpin,
-{
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, std::io::Error>> {
-        match self.as_mut().project() {
-            AddMtlsIOProj::InProgress { mut c } => c.poll_write(cx),
-            AddMtlsIOProj::Broken => Poll::Ready(Err(std::io::ErrorKind::Other.into())),
-            AddMtlsIOProj::Connected { inner } => inner.poll_write(cx, buf),
-        }
-    }
-
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
-        match self.as_mut().project() {
-            AddMtlsIOProj::InProgress { mut c } => c.poll_write(cx),
-            AddMtlsIOProj::Broken => Poll::Ready(Err(std::io::ErrorKind::Other.into())),
-            AddMtlsIOProj::Connected { inner } => inner.poll_shutdown(cx),
-        }
-    }
-
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
-        match self.as_mut().project() {
-            AddMtlsIOProj::InProgress { mut c } => c.poll_write(cx),
-            AddMtlsIOProj::Broken => Poll::Ready(Err(std::io::ErrorKind::Other.into())),
-            AddMtlsIOProj::Connected { inner } => inner.poll_flush(cx),
+    async fn connect(self) -> Result<Self::IO, Arc<dyn ErrorHtml>> {
+        let inner = self.inner.connect().await?;
+        let connector = TlsConnector::from(self.tls_config);
+        match connector.connect(self.name, inner).await {
+            Ok(io) => Ok(io),
+            Err(e) => Err(Arc::new(e)),
         }
     }
 }
 
 impl AddMtls {
-    pub fn connect<T>(&self, server_identity: &Uri, inner: T) -> Result<AddMtlsIO<T>, AddMtlsError>
+    pub fn connect<T>(
+        &self,
+        server_identity: &Uri,
+        inner: T,
+    ) -> Result<ConnectInSequence<T>, AddMtlsError>
     where
-        T: AsyncRead + AsyncWrite + Unpin,
+        T: Connectable,
     {
         let mut c = self.0.client_config(server_identity, None)?;
         c.enable_sni = false; // We have no sensible host name to use.
@@ -168,8 +68,10 @@ impl AddMtls {
         } else {
             ServerName::try_from("_").unwrap()
         };
-        Ok(AddMtlsIO::new(
-            TlsConnector::from(Arc::new(c)).connect(name.to_owned(), inner),
-        ))
+        Ok(ConnectInSequence {
+            inner,
+            tls_config: Arc::new(c),
+            name: name.to_owned(),
+        })
     }
 }

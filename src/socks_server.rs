@@ -9,6 +9,7 @@ use tokio::net::UnixListener;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::server::Connected;
 
+use crate::error_server::ErrorServer;
 use crate::router::DomainRouter;
 use crate::socks_proto;
 
@@ -21,10 +22,14 @@ enum SocksServingError {
     #[error("{0}")]
     Socks(#[from] socks_proto::SocksProtocolError),
     #[error("{0}")]
-    Serving(#[from] crate::router::ServeError),
+    Serving(#[from] crate::endpoint::ServeError),
 }
 
-async fn serve_socks<T>(mut s: T, router: Arc<DomainRouter>) -> Result<(), SocksServingError>
+async fn serve_socks<T>(
+    mut s: T,
+    router: Arc<DomainRouter>,
+    error_server: Arc<ErrorServer>,
+) -> Result<(), SocksServingError>
 where
     T: Connected + AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -51,7 +56,7 @@ where
         Ok(ep) => {
             send_reply(&mut s, socks_proto::REP_SUCCEEDED).await?;
             log::info!("CONNECT {domain:?}:{}", port);
-            ep.serve(s).await?;
+            ep.connect(error_server).await.serve(s).await?;
         }
         Err(e) => {
             send_reply(&mut s, e).await?;
@@ -73,14 +78,14 @@ pub struct SocksServerArgs {
 
 struct SocksServerTask {
     cancel: CancellationToken,
-    listener_and_router: Option<(UnixListener, Arc<DomainRouter>)>,
+    listener_and_router: Option<(UnixListener, Arc<DomainRouter>, Arc<ErrorServer>)>,
     socket_path: PathBuf,
 }
 
 impl TaskWithCleanup for SocksServerTask {
     #[allow(refining_impl_trait)]
     async fn main_task(&mut self) -> Result<(), std::convert::Infallible> {
-        let (listener, router) = self.listener_and_router.take().unwrap();
+        let (listener, router, error_server) = self.listener_and_router.take().unwrap();
         let cancel = self.cancel.clone();
         let _ = tokio::spawn(async move {
             let mut cancel_fut = pin!(cancel.cancelled());
@@ -92,10 +97,11 @@ impl TaskWithCleanup for SocksServerTask {
                     Either::Left((Ok((s, _)), _)) => {
                         let cancel2 = cancel.clone();
                         let router2 = router.clone();
+                        let error_server2 = error_server.clone();
                         tokio::spawn(async move {
                             cancel2
                                 .run_until_cancelled_owned(async move {
-                                    if let Err(e) = serve_socks(s, router2).await {
+                                    if let Err(e) = serve_socks(s, router2, error_server2).await {
                                         log::warn!("Socks connection: {e}");
                                     }
                                 })
@@ -122,7 +128,7 @@ impl TaskWithCleanup for SocksServerTask {
 #[resource]
 impl Resource for SocksServer {
     fn new(
-        (router,): (Arc<DomainRouter>,),
+        (router, error_server): (Arc<DomainRouter>, Arc<ErrorServer>),
         a: SocksServerArgs,
         api: &mut AssemblyRuntime<'_>,
     ) -> Result<Arc<Self>, std::io::Error> {
@@ -146,7 +152,7 @@ impl Resource for SocksServer {
         })?;
         api.set_task_with_cleanup(SocksServerTask {
             cancel: CancellationToken::new(),
-            listener_and_router: Some((listener, router)),
+            listener_and_router: Some((listener, router, error_server)),
             socket_path: a.socks_listen,
         });
         Ok(Arc::new(Self))

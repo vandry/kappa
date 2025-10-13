@@ -2,8 +2,8 @@ use comprehensive::v1::{AssemblyRuntime, Resource, resource};
 use http::Uri;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncWrite, copy_bidirectional};
-use tonic::transport::server::Connected;
+
+use crate::endpoint::Endpoint;
 
 #[derive(Debug, Error)]
 pub enum RouterError {
@@ -69,49 +69,6 @@ impl Resource for DomainRouter {
     }
 }
 
-crate::multiio::multiio! {
-    MultiIO {
-        E(crate::encap::EncapIO),
-        T(crate::mtls::AddMtlsIO<crate::encap::EncapIO>),
-    }
-}
-
-pub enum Endpoint {
-    Copy(MultiIO),
-    Http(Arc<crate::http_server::HttpServer>),
-    Api(Arc<crate::api::ApiServer>),
-}
-
-#[derive(Debug, Error)]
-pub enum ServeError {
-    #[error("{0}")]
-    IOError(#[from] std::io::Error),
-    #[error("{0}")]
-    Http(String),
-}
-
-impl Endpoint {
-    pub async fn serve<T>(self, mut io: T) -> Result<(), ServeError>
-    where
-        T: Connected + AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    {
-        match self {
-            Self::Copy(mut other) => {
-                copy_bidirectional(&mut other, &mut io).await?;
-                Ok(())
-            }
-            Self::Http(http_server) => http_server
-                .serve(io)
-                .await
-                .map_err(|e| ServeError::Http(e.to_string())),
-            Self::Api(http_server) => http_server
-                .serve(io)
-                .await
-                .map_err(|e| ServeError::Http(e.to_string())),
-        }
-    }
-}
-
 struct DecodeEscapedPath<I: Iterator> {
     delimiter: bool,
     inner: std::iter::Peekable<I>,
@@ -147,7 +104,11 @@ where
                 None => None,
                 Some(l) => {
                     self.delimiter = true;
-                    Some(if let Some(ll) = l.strip_prefix("_") { ll } else { l })
+                    Some(if let Some(ll) = l.strip_prefix("_") {
+                        ll
+                    } else {
+                        l
+                    })
                 }
             }
         }
@@ -239,10 +200,10 @@ impl DomainRouter {
                 "Connect to gateway for namespace {namespace:?} pod {pod:?} port {port} server identity {https_identity:?}"
             );
             let encap = self.encap.encap(namespace, pod, port);
-            return Ok(Endpoint::Copy(match https_identity {
-                Some(uri) => self.add_mtls.connect(&uri, encap)?.into(),
-                None => encap.into(),
-            }));
+            return Ok(match https_identity {
+                Some(uri) => Endpoint::Tls(self.add_mtls.connect(&uri, encap)?),
+                None => Endpoint::Encap(encap),
+            });
         } else if selector.eq_ignore_ascii_case("browser") {
             if port != 80 {
                 return Err(RouterError::PortUnreachable);
