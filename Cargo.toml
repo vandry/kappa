@@ -12,6 +12,7 @@ name = "kappa-gateway"
 path = "src/kappa-gateway.rs"
 
 [dependencies]
+async-stream = "0.3.6"
 axum = "0.7.9"
 backoff = { version = "0.4.0", features = ["futures", "tokio"] }
 bytes = "1.10.1"
