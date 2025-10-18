@@ -9,6 +9,16 @@
       <div id="status"></div>
     </div>
     <div class="section">
+      <div class="sectiontitle">Namespaces</div>
+      <input type="checkbox" id="namespace_all">
+      <label for="namespace_all">All</label>
+      <span style="display: none;" id="namespace_template">
+        | <input type="checkbox" class="namespace_select">
+          <button type="button" class="namespace_only">Only</button>
+          <label class="namespace_name"></label>
+      </span>
+    </div>
+    <div class="section">
       <div class="sectiontitle">Pods</div>
       <table>
         <thead>
