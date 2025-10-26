@@ -1,5 +1,6 @@
 use comprehensive::v1::{AssemblyRuntime, Resource, TaskWithCleanup, resource};
 use futures::future::Either;
+use std::os::fd::AsRawFd as _;
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
@@ -8,6 +9,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::UnixListener;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::server::Connected;
+use tracing::instrument::Instrument as _;
+use tracing::{Level, Span, span};
 
 use crate::error_server::ErrorServer;
 use crate::router::DomainRouter;
@@ -87,33 +90,43 @@ impl TaskWithCleanup for SocksServerTask {
     async fn main_task(&mut self) -> Result<(), std::convert::Infallible> {
         let (listener, router, error_server) = self.listener_and_router.take().unwrap();
         let cancel = self.cancel.clone();
-        let _ = tokio::spawn(async move {
-            let mut cancel_fut = pin!(cancel.cancelled());
-            loop {
-                match futures::future::select(pin!(listener.accept()), &mut cancel_fut).await {
-                    Either::Right(((), _)) => {
-                        break;
-                    }
-                    Either::Left((Ok((s, _)), _)) => {
-                        let cancel2 = cancel.clone();
-                        let router2 = router.clone();
-                        let error_server2 = error_server.clone();
-                        tokio::spawn(async move {
-                            cancel2
-                                .run_until_cancelled_owned(async move {
-                                    if let Err(e) = serve_socks(s, router2, error_server2).await {
-                                        log::warn!("Socks connection: {e}");
-                                    }
-                                })
-                                .await
-                        });
-                    }
-                    Either::Left((Err(e), _)) => {
-                        log::error!("UNIX socket accept error: {e}");
+        let _ = tokio::spawn(
+            async move {
+                let mut cancel_fut = pin!(cancel.cancelled());
+                loop {
+                    match futures::future::select(pin!(listener.accept()), &mut cancel_fut).await {
+                        Either::Right(((), _)) => {
+                            break;
+                        }
+                        Either::Left((Ok((s, _)), _)) => {
+                            let cancel2 = cancel.clone();
+                            let router2 = router.clone();
+                            let error_server2 = error_server.clone();
+                            let tracing_span =
+                                span!(Level::INFO, "connection", fd = s.as_raw_fd()).or_current();
+                            tokio::spawn(
+                                async move {
+                                    cancel2
+                                        .run_until_cancelled_owned(async move {
+                                            if let Err(e) =
+                                                serve_socks(s, router2, error_server2).await
+                                            {
+                                                log::warn!("Socks connection: {e}");
+                                            }
+                                        })
+                                        .await
+                                }
+                                .instrument(tracing_span),
+                            );
+                        }
+                        Either::Left((Err(e), _)) => {
+                            log::error!("UNIX socket accept error: {e}");
+                        }
                     }
                 }
             }
-        })
+            .instrument(Span::current()),
+        )
         .await;
         Ok(())
     }

@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("npm install failed".into());
     }
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .file_descriptor_set_path(out_dir.join("fdset.bin"))
         .protoc_arg(format!(
             "--plugin=protoc-gen-js={js_dir_str}/protoc-gen-js/bin/protoc-gen-js"
