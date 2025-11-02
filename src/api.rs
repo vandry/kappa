@@ -50,14 +50,14 @@ impl Resource for Api {
 
 pub struct ApiServer {
     server: tonic::transport::Server<Stack<GrpcWebLayer, Stack<CorsLayer, tower_layer::Identity>>>,
-    routes: Arc<comprehensive_grpc::server::GrpcServingRoutes>,
+    service: Arc<comprehensive_grpc::server::GrpcCommonService>,
 }
 
 #[resource]
 impl Resource for ApiServer {
     fn new(
-        (routes, _): (
-            Arc<comprehensive_grpc::server::GrpcServingRoutes>,
+        (service, _): (
+            Arc<comprehensive_grpc::server::GrpcCommonService>,
             PhantomData<Api>,
         ),
         _: NoArgs,
@@ -67,7 +67,7 @@ impl Resource for ApiServer {
             .accept_http1(true)
             .layer(CorsLayer::permissive())
             .layer(GrpcWebLayer::new());
-        Ok(Arc::new(Self { server, routes }))
+        Ok(Arc::new(Self { server, service }))
     }
 }
 
@@ -80,8 +80,7 @@ impl ApiServer {
             futures::stream::once(std::future::ready(Ok::<_, std::convert::Infallible>(io)));
         self.server
             .clone()
-            .add_routes(self.routes.routes())
-            .serve_with_incoming(stream)
+            .serve_with_incoming((*self.service).clone().into_service(), stream)
             .await
     }
 }

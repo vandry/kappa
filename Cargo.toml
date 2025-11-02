@@ -17,8 +17,8 @@ axum = "0.7.9"
 backoff = { version = "0.4.0", features = ["futures", "tokio"] }
 bytes = "1.10.1"
 clap = { version = "4.5", features = ["derive"] }
-comprehensive = { version = "0.9.0" }
-comprehensive_grpc = { version = "0.9.0", features = ["experimental", "tls"] }
+comprehensive = { version = "0.9.1" }
+comprehensive_grpc = { version = "0.9.1", features = ["tls"] }
 comprehensive_http = { version = "0.4.0", features = ["tls"] }
 comprehensive_spiffe = { version = "0.4.0" }
 comprehensive_tls = { version = "0.5.0", features = ["dispatch"] }
